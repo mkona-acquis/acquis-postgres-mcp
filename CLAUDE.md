@@ -12,7 +12,7 @@ This is a fork of [crystaldba/postgres-mcp](https://github.com/crystaldba/postgr
 - Add custom functionality for our team's specific use cases
 - Maintain compatibility with upstream features
 - Distribute via uvx for easy colleague access
-- [Add specific new features here as they are developed]
+- **✅ Temporal Table Versioning** - Track and revert data changes for safe migrations
 
 **Syncing with upstream:**
 ```bash
@@ -176,6 +176,20 @@ uvx acquis-postgres-mcp "postgresql://user:password@host:port/dbname" --access-m
 **Query Analysis**
 - `ExplainPlanTool (explain/explain_plan.py)`: Generates and formats EXPLAIN/EXPLAIN ANALYZE plans, supports hypothetical indexes via HypoPG
 - `TopQueriesCalc (top_queries/top_queries_calc.py)`: Analyzes pg_stat_statements data to identify slow queries and resource-intensive workloads
+
+**Temporal Versioning (`temporal/`)** ⭐ NEW
+- `TemporalManager (temporal_manager.py)`: Manages temporal versioning for tables
+  - Creates history tables and triggers to automatically track all INSERT, UPDATE, and DELETE operations
+  - Stores metadata in `temporal_versioning` schema with `versioned_tables` tracking table
+  - Each history table includes temporal metadata: operation type, valid_from timestamp, transaction ID
+  - Supports enabling/disabling versioning and listing all versioned tables
+- `TemporalQuery (temporal_query.py)`: Queries and manipulates historical data
+  - Query data as it existed at any specific timestamp (point-in-time recovery)
+  - View change history with filtering by time range and operation type
+  - Compare table states between two timestamps (diff functionality)
+  - Revert tables to previous states with dry-run capability for safety
+  - Track individual row history across all changes
+- **Use Cases**: Data migration safety nets, auditing, rollback capabilities, understanding data transformations over time
 
 **Safety Features (`sql/safe_sql.py`)**
 - Enforces read-only transactions when in RESTRICTED mode

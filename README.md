@@ -3,12 +3,14 @@
 <img src="assets/postgres-mcp-pro.png" alt="Postgres MCP Pro Logo" width="600"/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![PyPI - Version](https://img.shields.io/pypi/v/postgres-mcp)](https://pypi.org/project/postgres-mcp/)
+[![PyPI - Version](https://img.shields.io/pypi/v/acquis-postgres-mcp)](https://pypi.org/project/acquis-postgres-mcp/)
+[![Upstream](https://img.shields.io/badge/upstream-crystaldba%2Fpostgres--mcp-blue)](https://github.com/crystaldba/postgres-mcp)
 [![Discord](https://img.shields.io/discord/1336769798603931789?label=Discord)](https://discord.gg/4BEHC7ZM)
 [![Twitter Follow](https://img.shields.io/twitter/follow/auto_dba?style=flat)](https://x.com/auto_dba)
-[![Contributors](https://img.shields.io/github/contributors/crystaldba/postgres-mcp)](https://github.com/crystaldba/postgres-mcp/graphs/contributors)
 
 <h3>A Postgres MCP server with index tuning, explain plans, health checks, and safe sql execution.</h3>
+
+> **Note:** This is the Acquis Consulting fork of [crystaldba/postgres-mcp](https://github.com/crystaldba/postgres-mcp) with additional features for data migration workflows. Published as `acquis-postgres-mcp` on PyPI.
 
 <div class="toc">
   <a href="#overview">Overview</a> •
@@ -35,6 +37,7 @@ Features include:
 - **📈 Query Plans** - validate and optimize performance by reviewing EXPLAIN plans and simulating the impact of hypothetical indexes.
 - **🧠 Schema Intelligence** - context-aware SQL generation based on detailed understanding of the database schema.
 - **🛡️ Safe SQL Execution** - configurable access control, including support for read-only mode and safe SQL parsing, making it usable for both development and production.
+- **⏱️ Temporal Versioning** ⭐ NEW - automatic change tracking with point-in-time recovery and data reversion for safe migrations. [See docs](docs/TEMPORAL_VERSIONING.md)
 
 Postgres MCP Pro supports both the [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) and [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) transports, for flexibility in different environments.
 
@@ -91,18 +94,24 @@ docker pull crystaldba/postgres-mcp
 ```
 
 
-#### Option 2: Using Python
+#### Option 2: Using Python (Acquis Fork)
 
-If you have `pipx` installed you can install Postgres MCP Pro with:
+If you have `pipx` installed you can install the Acquis fork with:
 
 ```bash
-pipx install postgres-mcp
+pipx install acquis-postgres-mcp
 ```
 
-Otherwise, install Postgres MCP Pro with `uv`:
+Or run directly with `uvx` (recommended):
 
 ```bash
-uv pip install postgres-mcp
+uvx acquis-postgres-mcp "postgresql://username:password@localhost:5432/dbname" --access-mode=unrestricted
+```
+
+Otherwise, install with `uv`:
+
+```bash
+uv pip install acquis-postgres-mcp
 ```
 
 If you need to install `uv`, see the [uv installation instructions](https://docs.astral.sh/uv/getting-started/installation/).
@@ -153,15 +162,15 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
 - MacOS/Windows: Uses `host.docker.internal` automatically
 - Linux: Uses `172.17.0.1` or the appropriate host address automatically
 
-##### If you are using `uvx`
+##### If you are using `uvx` (Recommended)
 
 ```json
 {
   "mcpServers": {
-    "postgres": {
+    "acquis-postgres": {
       "command": "uvx",
       "args": [
-        "postgres-mcp",
+        "acquis-postgres-mcp",
         "--access-mode=unrestricted"
       ],
       "env": {
@@ -178,8 +187,8 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
 ```json
 {
   "mcpServers": {
-    "postgres": {
-      "command": "postgres-mcp",
+    "acquis-postgres": {
+      "command": "acquis-postgres-mcp",
       "args": [
         "--access-mode=unrestricted"
       ],
@@ -197,11 +206,11 @@ The Postgres MCP Pro Docker image will automatically remap the hostname `localho
 ```json
 {
   "mcpServers": {
-    "postgres": {
+    "acquis-postgres": {
       "command": "uv",
       "args": [
         "run",
-        "postgres-mcp",
+        "acquis-postgres-mcp",
         "--access-mode=unrestricted"
       ],
       "env": {
@@ -241,21 +250,26 @@ Many MCP clients have similar configuration files to Claude Desktop, and you can
 Postgres MCP Pro supports the [SSE transport](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse), which allows multiple MCP clients to share one server, possibly a remote server.
 To use the SSE transport, you need to start the server with the `--transport=sse` option.
 
-For example, with Docker run:
+For example, with the Acquis fork:
 
 ```bash
+# Using uvx
+uvx acquis-postgres-mcp "postgresql://username:password@localhost:5432/dbname" \
+  --access-mode=unrestricted --transport=sse --sse-host=localhost --sse-port=8000
+
+# Or with Docker (upstream)
 docker run -p 8000:8000 \
   -e DATABASE_URI=postgresql://username:password@localhost:5432/dbname \
   crystaldba/postgres-mcp --access-mode=unrestricted --transport=sse
 ```
 
-Then update your MCP client configuration to call the the MCP server.
+Then update your MCP client configuration to call the MCP server.
 For example, in Cursor's `mcp.json` or Cline's `cline_mcp_settings.json` you can put:
 
 ```json
 {
     "mcpServers": {
-        "postgres": {
+        "acquis-postgres": {
             "type": "sse",
             "url": "http://localhost:8000/sse"
         }
@@ -268,7 +282,7 @@ For Windsurf, the format in `mcp_config.json` is slightly different:
 ```json
 {
     "mcpServers": {
-        "postgres": {
+        "acquis-postgres": {
             "type": "sse",
             "serverUrl": "http://localhost:8000/sse"
         }
@@ -327,6 +341,21 @@ Ask:
 Ask:
 > Help me optimize this query: SELECT \* FROM orders JOIN customers ON orders.customer_id = customers.id WHERE orders.created_at > '2023-01-01';
 
+### Enable Temporal Versioning for Safe Migrations ⭐ NEW
+
+Ask:
+> Enable temporal versioning on the customers table before I run my data migration.
+
+### Revert Data After Migration Issue ⭐ NEW
+
+Ask:
+> Something went wrong with my migration. Show me what changed in the last hour and revert the orders table to before the migration started.
+
+### Track Changes During Data Transformation ⭐ NEW
+
+Ask:
+> I'm about to run a complex data transformation on the products table. Help me set up change tracking so I can see exactly what changed and roll back if needed.
+
 ## MCP Server API
 
 The [MCP standard](https://modelcontextprotocol.io/) defines various types of endpoints: Tools, Resources, Prompts, and others.
@@ -338,17 +367,40 @@ This contrasts with the approach of other Postgres MCP servers, including the [R
 
 Postgres MCP Pro Tools:
 
+**Schema & Execution Tools:**
+
 | Tool Name | Description |
 |-----------|-------------|
 | `list_schemas` | Lists all database schemas available in the PostgreSQL instance. |
 | `list_objects` | Lists database objects (tables, views, sequences, extensions) within a specified schema. |
 | `get_object_details` | Provides information about a specific database object, for example, a table's columns, constraints, and indexes. |
 | `execute_sql` | Executes SQL statements on the database, with read-only limitations when connected in restricted mode. |
+
+**Performance & Optimization Tools:**
+
+| Tool Name | Description |
+|-----------|-------------|
 | `explain_query` | Gets the execution plan for a SQL query describing how PostgreSQL will process it and exposing the query planner's cost model. Can be invoked with hypothetical indexes to simulate the behavior after adding indexes. |
 | `get_top_queries` | Reports the slowest SQL queries based on total execution time using `pg_stat_statements` data. |
 | `analyze_workload_indexes` | Analyzes the database workload to identify resource-intensive queries, then recommends optimal indexes for them. |
 | `analyze_query_indexes` | Analyzes a list of specific SQL queries (up to 10) and recommends optimal indexes for them. |
 | `analyze_db_health` | Performs comprehensive health checks including: buffer cache hit rates, connection health, constraint validation, index health (duplicate/unused/invalid), sequence limits, and vacuum health. |
+
+**Temporal Versioning Tools** ⭐ NEW (Acquis Fork):
+
+| Tool Name | Description |
+|-----------|-------------|
+| `enable_temporal_versioning` | Enable automatic change tracking for a table. Creates history table and triggers to capture all INSERT/UPDATE/DELETE operations. |
+| `disable_temporal_versioning` | Disable temporal versioning for a table. Optionally drop history table or preserve it for analysis. |
+| `list_temporal_tables` | List all tables with temporal versioning enabled, showing status and history table information. |
+| `get_temporal_status` | Get detailed versioning status for a table, including statistics on tracked changes (inserts/updates/deletes). |
+| `query_temporal_data` | Query table data as it existed at a specific timestamp. Reconstruct historical state from version history. |
+| `get_change_history` | View all changes to a table within a time range. Filter by operation type (INSERT/UPDATE/DELETE) and timestamp. |
+| `revert_table_data` | Restore a table to its state at a previous timestamp. **Destructive operation** - always use dry_run=true first! |
+| `compare_temporal_data` | Compare table data between two timestamps. Shows added, deleted, and modified rows (diff functionality). |
+| `get_row_history` | Track the complete change history for a specific row across all operations. |
+
+📖 **See [Temporal Versioning Documentation](docs/TEMPORAL_VERSIONING.md) for detailed usage examples.**
 
 
 ## Related Projects
@@ -634,18 +686,31 @@ The instructions below are for developers who want to work on Postgres MCP Pro, 
 2. **Clone the repository**:
 
    ```bash
-   git clone https://github.com/crystaldba/postgres-mcp.git
-   cd postgres-mcp
+   git clone https://github.com/mkona-acquis/acquis-postgres-mcp.git
+   cd acquis-postgres-mcp
    ```
 
 3. **Install dependencies**:
 
    ```bash
-   uv pip install -e .
    uv sync
    ```
 
 4. **Run the server**:
    ```bash
-   uv run postgres-mcp "postgres://user:password@localhost:5432/dbname"
+   uv run acquis-postgres-mcp "postgresql://user:password@localhost:5432/dbname" --access-mode=unrestricted
+   ```
+
+5. **Run tests**:
+   ```bash
+   uv run pytest tests/unit/ -v
+   ```
+
+6. **Build and publish**:
+   ```bash
+   # Quick patch version bump and publish
+   ./scripts/publish.sh
+
+   # Or manually
+   rm -rf dist/ && uv build && uv publish
    ```
