@@ -38,14 +38,14 @@ class TemporalManager:
     async def _ensure_temporal_schema(self) -> None:
         """Ensure the temporal versioning schema and metadata table exist."""
         # Create schema for temporal infrastructure
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             """
             CREATE SCHEMA IF NOT EXISTS temporal_versioning
             """
         )
 
         # Create metadata table to track which tables have versioning enabled
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             """
             CREATE TABLE IF NOT EXISTS temporal_versioning.versioned_tables (
                 id SERIAL PRIMARY KEY,
@@ -79,13 +79,14 @@ class TemporalManager:
         qualified_history = f"temporal_versioning.{history_table_name}"
 
         # Check if versioning is already enabled
-        existing = await self.sql_driver.fetchone(
+        existing_results = await self.sql_driver.execute_query(
             """
             SELECT * FROM temporal_versioning.versioned_tables
             WHERE schema_name = %s AND table_name = %s
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        existing = existing_results[0].cells if existing_results else None
 
         if existing and existing.get("enabled"):
             return {
@@ -95,7 +96,7 @@ class TemporalManager:
             }
 
         # Get the table structure
-        columns_result = await self.sql_driver.fetchall(
+        columns_query_result = await self.sql_driver.execute_query(
             """
             SELECT column_name, data_type, character_maximum_length,
                    numeric_precision, numeric_scale, is_nullable
@@ -103,8 +104,9 @@ class TemporalManager:
             WHERE table_schema = %s AND table_name = %s
             ORDER BY ordinal_position
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        columns_result = [row.cells for row in columns_query_result] if columns_query_result else []
 
         if not columns_result:
             raise ValueError(f"Table {qualified_table} not found")
@@ -147,10 +149,10 @@ class TemporalManager:
             {", ".join(column_defs)}
         )
         """
-        await self.sql_driver.execute(create_history_sql)
+        await self.sql_driver.execute_query(create_history_sql)
 
         # Create index on temporal columns for efficient querying
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             f"""
             CREATE INDEX IF NOT EXISTS {history_table_name}_temporal_idx
             ON {qualified_history} (temporal_valid_from, temporal_valid_to)
@@ -161,7 +163,7 @@ class TemporalManager:
         trigger_function_name = f"temporal_versioning.{table_name}_history_trigger"
         column_list = ", ".join(column_names)
 
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             f"""
             CREATE OR REPLACE FUNCTION {trigger_function_name}()
             RETURNS TRIGGER AS $$
@@ -187,9 +189,9 @@ class TemporalManager:
 
         # Create triggers for INSERT, UPDATE, DELETE
         trigger_name = f"{table_name}_temporal_trigger"
-        await self.sql_driver.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
+        await self.sql_driver.execute_query(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
 
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             f"""
             CREATE TRIGGER {trigger_name}
             AFTER INSERT OR UPDATE OR DELETE ON {qualified_table}
@@ -198,7 +200,7 @@ class TemporalManager:
         )
 
         # Register in metadata table
-        await self.sql_driver.execute(
+        await self.sql_driver.execute_query(
             """
             INSERT INTO temporal_versioning.versioned_tables (schema_name, table_name, history_table_name, enabled)
             VALUES (%s, %s, %s, TRUE)
@@ -230,13 +232,14 @@ class TemporalManager:
         qualified_table = f"{schema_name}.{table_name}"
 
         # Get versioning info
-        version_info = await self.sql_driver.fetchone(
+        version_info_result = await self.sql_driver.execute_query(
             """
             SELECT * FROM temporal_versioning.versioned_tables
             WHERE schema_name = %s AND table_name = %s
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        version_info = version_info_result[0].cells if version_info_result else None
 
         if not version_info:
             return {
@@ -249,11 +252,11 @@ class TemporalManager:
 
         # Drop trigger
         trigger_name = f"{table_name}_temporal_trigger"
-        await self.sql_driver.execute(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
+        await self.sql_driver.execute_query(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
 
         # Drop trigger function
         trigger_function_name = f"temporal_versioning.{table_name}_history_trigger"
-        await self.sql_driver.execute(f"DROP FUNCTION IF EXISTS {trigger_function_name}()")
+        await self.sql_driver.execute_query(f"DROP FUNCTION IF EXISTS {trigger_function_name}()")
 
         result: Dict[str, Any] = {
             "status": "disabled",
@@ -263,12 +266,12 @@ class TemporalManager:
 
         if drop_history:
             # Drop history table
-            await self.sql_driver.execute(f"DROP TABLE IF EXISTS {qualified_history}")
+            await self.sql_driver.execute_query(f"DROP TABLE IF EXISTS {qualified_history}")
             result["history_dropped"] = True
             result["message"] += " (history table dropped)"
 
             # Remove from metadata
-            await self.sql_driver.execute(
+            await self.sql_driver.execute_query(
                 """
                 DELETE FROM temporal_versioning.versioned_tables
                 WHERE schema_name = %s AND table_name = %s
@@ -277,7 +280,7 @@ class TemporalManager:
             )
         else:
             # Just mark as disabled
-            await self.sql_driver.execute(
+            await self.sql_driver.execute_query(
                 """
                 UPDATE temporal_versioning.versioned_tables
                 SET enabled = FALSE
@@ -302,7 +305,7 @@ class TemporalManager:
             # If schema doesn't exist, no tables are versioned
             return []
 
-        results = await self.sql_driver.fetchall(
+        results_query = await self.sql_driver.execute_query(
             """
             SELECT schema_name, table_name, history_table_name, enabled,
                    created_at::text as created_at
@@ -310,6 +313,7 @@ class TemporalManager:
             ORDER BY schema_name, table_name
             """
         )
+        results = [row.cells for row in results_query] if results_query else []
 
         return [
             TemporalTable(
@@ -337,13 +341,14 @@ class TemporalManager:
         except Exception:
             return {"versioned": False, "message": "Temporal versioning not initialized"}
 
-        version_info = await self.sql_driver.fetchone(
+        version_info_result = await self.sql_driver.execute_query(
             """
             SELECT * FROM temporal_versioning.versioned_tables
             WHERE schema_name = %s AND table_name = %s
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        version_info = version_info_result[0].cells if version_info_result else None
 
         if not version_info:
             return {
@@ -354,7 +359,7 @@ class TemporalManager:
         qualified_history = f"temporal_versioning.{version_info['history_table_name']}"
 
         # Get statistics about the history table
-        stats = await self.sql_driver.fetchone(
+        stats_result = await self.sql_driver.execute_query(
             f"""
             SELECT
                 COUNT(*) as total_changes,
@@ -367,6 +372,7 @@ class TemporalManager:
             FROM {qualified_history}
             """
         )
+        stats = stats_result[0].cells if stats_result else None
 
         return {
             "versioned": True,

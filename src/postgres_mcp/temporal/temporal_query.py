@@ -46,13 +46,14 @@ class TemporalQuery:
         Returns:
             Qualified history table name or None if not versioned
         """
-        result = await self.sql_driver.fetchone(
+        result_query = await self.sql_driver.execute_query(
             """
             SELECT history_table_name FROM temporal_versioning.versioned_tables
             WHERE schema_name = %s AND table_name = %s AND enabled = TRUE
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        result = result_query[0].cells if result_query else None
 
         if not result:
             return None
@@ -69,15 +70,16 @@ class TemporalQuery:
         Returns:
             List of column names
         """
-        columns_result = await self.sql_driver.fetchall(
+        columns_query = await self.sql_driver.execute_query(
             """
             SELECT column_name
             FROM information_schema.columns
             WHERE table_schema = %s AND table_name = %s
             ORDER BY ordinal_position
             """,
-            (schema_name, table_name),
+            [schema_name, table_name],
         )
+        columns_result = [row.cells for row in columns_query] if columns_query else []
 
         return [col["column_name"] for col in columns_result]
 
@@ -126,7 +128,8 @@ class TemporalQuery:
         LIMIT %s
         """
 
-        results = await self.sql_driver.fetchall(query, (timestamp, limit))
+        results_query = await self.sql_driver.execute_query(query, [timestamp, limit])
+        results = [row.cells for row in results_query] if results_query else []
 
         return {
             "schema_name": schema_name,
@@ -198,7 +201,8 @@ class TemporalQuery:
         """
 
         params.append(limit)
-        results = await self.sql_driver.fetchall(query, tuple(params))
+        results_query = await self.sql_driver.execute_query(query, params)
+        results = [row.cells for row in results_query] if results_query else []
 
         return {
             "schema_name": schema_name,
@@ -240,7 +244,8 @@ class TemporalQuery:
         column_list = ", ".join(columns)
 
         # Get current row count
-        current_count_result = await self.sql_driver.fetchone(f"SELECT COUNT(*) as count FROM {qualified_table}")
+        current_count_query = await self.sql_driver.execute_query(f"SELECT COUNT(*) as count FROM {qualified_table}")
+        current_count_result = current_count_query[0].cells if current_count_query else None
         current_count = current_count_result["count"] if current_count_result else 0
 
         # Query what the table looked like at the timestamp
@@ -265,7 +270,7 @@ class TemporalQuery:
 
         # Perform the revert
         # 1. Delete all current rows
-        await self.sql_driver.execute(f"DELETE FROM {qualified_table}")
+        await self.sql_driver.execute_query(f"DELETE FROM {qualified_table}")
 
         # 2. Insert historical rows
         if historical_state["rows"]:
@@ -276,7 +281,7 @@ class TemporalQuery:
             # Insert each row
             for row in historical_state["rows"]:
                 values = tuple(row[col] for col in columns)
-                await self.sql_driver.execute(insert_query, values)
+                await self.sql_driver.execute_query(insert_query, values)
 
         result["message"] = f"Successfully reverted {qualified_table} to state at {timestamp}"
         result["reverted"] = True
@@ -388,7 +393,8 @@ class TemporalQuery:
         LIMIT %s
         """
 
-        results = await self.sql_driver.fetchall(query, (primary_key_value, limit))
+        results_query = await self.sql_driver.execute_query(query, [primary_key_value, limit])
+        results = [row.cells for row in results_query] if results_query else []
 
         return {
             "schema_name": schema_name,
