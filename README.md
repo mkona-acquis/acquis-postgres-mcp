@@ -10,6 +10,8 @@
 
 <h3>A Postgres MCP server with index tuning, explain plans, health checks, and safe sql execution.</h3>
 
+> **Note:** This is the Acquis Consulting fork of [crystaldba/postgres-mcp](https://github.com/crystaldba/postgres-mcp) with additional features for data migration workflows. Published as `acquis-postgres-mcp` on PyPI.
+
 <div class="toc">
   <a href="#overview">Overview</a> •
   <a href="#demo">Demo</a> •
@@ -35,6 +37,7 @@ Features include:
 - **📈 Query Plans** - validate and optimize performance by reviewing EXPLAIN plans and simulating the impact of hypothetical indexes.
 - **🧠 Schema Intelligence** - context-aware SQL generation based on detailed understanding of the database schema.
 - **🛡️ Safe SQL Execution** - configurable access control, including support for read-only mode and safe SQL parsing, making it usable for both development and production.
+- **⏱️ Temporal Versioning** ⭐ NEW - automatic change tracking with point-in-time recovery and data reversion for safe migrations. [See docs](docs/TEMPORAL_VERSIONING.md)
 
 Postgres MCP Pro supports both the [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) and [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) transports, for flexibility in different environments.
 

@@ -32,6 +32,8 @@ from .sql import SafeSqlDriver
 from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
+from .temporal import TemporalManager
+from .temporal import TemporalQuery
 from .top_queries import TopQueriesCalc
 
 # Initialize FastMCP with default settings
@@ -551,6 +553,253 @@ async def get_top_queries(
         return format_text_response(result)
     except Exception as e:
         logger.error(f"Error getting slow queries: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Enable temporal versioning (history tracking) for specified tables. "
+    "This creates a history table and triggers to automatically track all INSERT, UPDATE, and DELETE operations. "
+    "Useful for data migration workflows where you want to track changes and potentially revert.",
+    annotations=ToolAnnotations(
+        title="Enable Temporal Versioning",
+        destructiveHint=True,
+    ),
+)
+@validate_call
+async def enable_temporal_versioning(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table to enable versioning for"),
+    history_table_suffix: str = Field(description="Suffix for history table name", default="_history"),
+) -> ResponseType:
+    """Enable temporal versioning for a table."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_mgr = TemporalManager(sql_driver)
+        result = await temporal_mgr.enable_versioning(schema_name, table_name, history_table_suffix)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error enabling temporal versioning: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Disable temporal versioning for a table. "
+    "You can optionally drop the history table (which deletes all historical data) or preserve it for later analysis.",
+    annotations=ToolAnnotations(
+        title="Disable Temporal Versioning",
+        destructiveHint=True,
+    ),
+)
+@validate_call
+async def disable_temporal_versioning(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    drop_history: bool = Field(description="Whether to drop the history table (delete all history)", default=False),
+) -> ResponseType:
+    """Disable temporal versioning for a table."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_mgr = TemporalManager(sql_driver)
+        result = await temporal_mgr.disable_versioning(schema_name, table_name, drop_history)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error disabling temporal versioning: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="List all tables that have temporal versioning enabled. Shows both active and disabled versioned tables.",
+    annotations=ToolAnnotations(
+        title="List Temporal Tables",
+        readOnlyHint=True,
+    ),
+)
+async def list_temporal_tables() -> ResponseType:
+    """List all temporally versioned tables."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_mgr = TemporalManager(sql_driver)
+        tables = await temporal_mgr.list_versioned_tables()
+
+        if not tables:
+            return format_text_response("No tables have temporal versioning enabled.")
+
+        result = []
+        for table in tables:
+            result.append(
+                {
+                    "schema": table.schema_name,
+                    "table": table.table_name,
+                    "history_table": table.history_table_name,
+                    "enabled": table.enabled,
+                    "created_at": table.created_at,
+                }
+            )
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error listing temporal tables: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Get detailed temporal versioning status for a specific table, including statistics about tracked changes.",
+    annotations=ToolAnnotations(
+        title="Get Temporal Status",
+        readOnlyHint=True,
+    ),
+)
+@validate_call
+async def get_temporal_status(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+) -> ResponseType:
+    """Get temporal versioning status for a table."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_mgr = TemporalManager(sql_driver)
+        status = await temporal_mgr.get_versioning_status(schema_name, table_name)
+        return format_text_response(status)
+    except Exception as e:
+        logger.error(f"Error getting temporal status: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Query table data as it existed at a specific point in time. "
+    "Provide timestamp in ISO format (e.g., '2024-01-15 10:30:00' or '2024-01-15T10:30:00'). "
+    "This reconstructs the historical state from the version history.",
+    annotations=ToolAnnotations(
+        title="Query Temporal Data",
+        readOnlyHint=True,
+    ),
+)
+@validate_call
+async def query_temporal_data(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    timestamp: str = Field(description="ISO timestamp to query (e.g., '2024-01-15 10:30:00')"),
+    limit: int = Field(description="Maximum rows to return", default=100),
+) -> ResponseType:
+    """Query data as it existed at a specific timestamp."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_query = TemporalQuery(sql_driver)
+        result = await temporal_query.query_at_timestamp(schema_name, table_name, timestamp, limit)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error querying temporal data: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Get change history for a table within a time range. "
+    "Shows all INSERT, UPDATE, and DELETE operations. You can filter by operation type and time range. "
+    "Timestamps should be in ISO format (e.g., '2024-01-15 10:30:00').",
+    annotations=ToolAnnotations(
+        title="Get Change History",
+        readOnlyHint=True,
+    ),
+)
+@validate_call
+async def get_change_history(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    start_time: str | None = Field(description="Start of time range (ISO timestamp, optional)", default=None),
+    end_time: str | None = Field(description="End of time range (ISO timestamp, optional)", default=None),
+    operation: str | None = Field(description="Filter by operation: 'INSERT', 'UPDATE', or 'DELETE' (optional)", default=None),
+    limit: int = Field(description="Maximum changes to return", default=100),
+) -> ResponseType:
+    """Get change history for a table."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_query = TemporalQuery(sql_driver)
+        result = await temporal_query.get_change_history(schema_name, table_name, start_time, end_time, operation, limit)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error getting change history: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Revert a table to its state at a specific timestamp. "
+    "**WARNING: This is destructive!** It deletes current data and restores historical data. "
+    "ALWAYS use dry_run=True first to preview changes before executing. "
+    "Useful for rolling back data migration mistakes.",
+    annotations=ToolAnnotations(
+        title="Revert Table Data",
+        destructiveHint=True,
+    ),
+)
+@validate_call
+async def revert_table_data(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    timestamp: str = Field(description="ISO timestamp to revert to (e.g., '2024-01-15 10:30:00')"),
+    dry_run: bool = Field(description="Preview changes without executing (RECOMMENDED: use true first)", default=True),
+) -> ResponseType:
+    """Revert table to a previous state."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_query = TemporalQuery(sql_driver)
+        result = await temporal_query.revert_to_timestamp(schema_name, table_name, timestamp, dry_run)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error reverting table data: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Compare table data between two timestamps to see what changed. "
+    "Shows added, deleted, and modified rows between the two time points. "
+    "Useful for understanding the impact of data transformations.",
+    annotations=ToolAnnotations(
+        title="Compare Temporal Data",
+        readOnlyHint=True,
+    ),
+)
+@validate_call
+async def compare_temporal_data(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    timestamp1: str = Field(description="First (earlier) timestamp in ISO format"),
+    timestamp2: str = Field(description="Second (later) timestamp in ISO format"),
+    limit: int = Field(description="Maximum differences to return per category", default=100),
+) -> ResponseType:
+    """Compare table data between two timestamps."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_query = TemporalQuery(sql_driver)
+        result = await temporal_query.compare_timestamps(schema_name, table_name, timestamp1, timestamp2, limit)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error comparing temporal data: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Get the complete change history for a specific row identified by its primary key. "
+    "Shows all operations (INSERT, UPDATE, DELETE) that affected this row over time.",
+    annotations=ToolAnnotations(
+        title="Get Row History",
+        readOnlyHint=True,
+    ),
+)
+@validate_call
+async def get_row_history(
+    schema_name: str = Field(description="Schema containing the table"),
+    table_name: str = Field(description="Name of the table"),
+    primary_key_column: str = Field(description="Name of the primary key column"),
+    primary_key_value: str = Field(description="Value of the primary key to track"),
+    limit: int = Field(description="Maximum changes to return", default=100),
+) -> ResponseType:
+    """Get complete change history for a specific row."""
+    try:
+        sql_driver = await get_sql_driver()
+        temporal_query = TemporalQuery(sql_driver)
+        result = await temporal_query.get_row_history(schema_name, table_name, primary_key_column, primary_key_value, limit)
+        return format_text_response(result)
+    except Exception as e:
+        logger.error(f"Error getting row history: {e}")
         return format_error_response(str(e))
 
 
