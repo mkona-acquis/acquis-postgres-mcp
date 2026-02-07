@@ -1,7 +1,7 @@
 [project]
-name = "postgres-mcp"
+name = "acquis-postgres-mcp"
 version = "0.3.0"
-description = "PostgreSQL Tuning and Analysis Tool"
+description = "PostgreSQL Tuning and Analysis Tool (Acquis Fork)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -17,14 +17,22 @@ license = "mit"
 license-files = ["LICENSE"]
 
 [[project.authors]]
-name = "Johann Schleier-Smith"
-email = "jssmith@crystal.cloud"
+name = "Martin Kona"
+email = "mkona@acquisconsulting.com"
+
+[[project.maintainers]]
+name = "Martin Kona"
+email = "mkona@acquisconsulting.com"
 
 [build-system]
 requires = [ "hatchling",]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/postgres_mcp"]
+
 [project.scripts]
+acquis-postgres-mcp = "postgres_mcp:main"
 postgres-mcp = "postgres_mcp:main"
 
 # [tool.pyright]
@@ -84,7 +92,7 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 force-single-line = true
-known-first-party = ["postgres-mcp"]
+known-first-party = ["acquis-postgres-mcp", "postgres_mcp"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
