@@ -218,7 +218,7 @@ class HistoryManager:
             "columns_tracked": len(column_names),
         }
 
-    async def disable_versioning(self, schema_name: str, table_name: str, drop_history: bool = False) -> Dict[str, Any]:
+    async def disable_tracking(self, schema_name: str, table_name: str, drop_history: bool = False) -> Dict[str, Any]:
         """Disable history tracking for a table.
 
         Args:
@@ -326,7 +326,7 @@ class HistoryManager:
             for row in results
         ]
 
-    async def get_versioning_status(self, schema_name: str, table_name: str) -> Dict[str, Any]:
+    async def get_tracking_status(self, schema_name: str, table_name: str) -> Dict[str, Any]:
         """Get detailed versioning status for a specific table.
 
         Args:

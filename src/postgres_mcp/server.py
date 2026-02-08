@@ -24,6 +24,8 @@ from .artifacts import ExplainPlanArtifact
 from .database_health import DatabaseHealthTool
 from .database_health import HealthType
 from .explain import ExplainPlanTool
+from .history import HistoryManager
+from .history import HistoryQuery
 from .index.index_opt_base import MAX_NUM_INDEX_TUNING_QUERIES
 from .index.llm_opt import LLMOptimizerTool
 from .index.presentation import TextPresentation
@@ -32,8 +34,6 @@ from .sql import SafeSqlDriver
 from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
-from .history import HistoryManager
-from .history import HistoryQuery
 from .top_queries import TopQueriesCalc
 
 # Initialize FastMCP with default settings
