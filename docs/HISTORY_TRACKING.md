@@ -1,6 +1,6 @@
-# Temporal Table Versioning
+# History Tracking
 
-Temporal versioning provides automatic change tracking for PostgreSQL tables, enabling you to:
+History tracking provides automatic change tracking for PostgreSQL tables, enabling you to:
 - Track all changes (INSERT, UPDATE, DELETE) automatically
 - Query data as it existed at any point in time
 - Revert tables to previous states
@@ -13,7 +13,7 @@ Temporal versioning provides automatic change tracking for PostgreSQL tables, en
 
 ```python
 # Enable versioning for a table
-enable_temporal_versioning(
+enable_table_history(
     schema_name="public",
     table_name="customers",
     history_table_suffix="_history"  # Optional, default is "_history"
@@ -21,9 +21,9 @@ enable_temporal_versioning(
 ```
 
 This creates:
-- A history table (`temporal_versioning.customers_history`) to store all changes
+- A history table (`history_tracking.customers_history`) to store all changes
 - Triggers that automatically capture INSERT, UPDATE, and DELETE operations
-- Metadata tracking in `temporal_versioning.versioned_tables`
+- Metadata tracking in `history_tracking.versioned_tables`
 
 ### 2. Make Changes to Your Data
 
@@ -40,7 +40,7 @@ DELETE FROM customers WHERE id = 1;
 
 ```python
 # View data as it existed at a specific timestamp
-query_temporal_data(
+query_table_history(
     schema_name="public",
     table_name="customers",
     timestamp="2024-01-15 10:30:00",
@@ -83,7 +83,7 @@ revert_table_data(
 
 ```python
 # Before starting a complex data transformation:
-enable_temporal_versioning(schema_name="public", table_name="orders")
+enable_table_history(schema_name="public", table_name="orders")
 
 # Perform your migration/transformation
 # ... run migration scripts ...
@@ -101,7 +101,7 @@ revert_table_data(
 
 ```python
 # Compare data between two points in time
-compare_temporal_data(
+compare_table_history(
     schema_name="public",
     table_name="products",
     timestamp1="2024-01-01 00:00:00",
@@ -137,14 +137,14 @@ get_change_history(
 ### List All Versioned Tables
 
 ```python
-list_temporal_tables()
+list_tables_with_history()
 # Returns: list of all tables with versioning enabled/disabled
 ```
 
 ### Check Status of a Table
 
 ```python
-get_temporal_status(
+get_table_history_status(
     schema_name="public",
     table_name="customers"
 )
@@ -155,14 +155,14 @@ get_temporal_status(
 
 ```python
 # Disable versioning but keep history for analysis
-disable_temporal_versioning(
+disable_table_history(
     schema_name="public",
     table_name="customers",
     drop_history=False  # Preserves history table
 )
 
 # Disable and remove all history
-disable_temporal_versioning(
+disable_table_history(
     schema_name="public",
     table_name="customers",
     drop_history=True  # Deletes history table
@@ -173,10 +173,10 @@ disable_temporal_versioning(
 
 ### History Table Structure
 
-For a table `public.customers`, versioning creates `temporal_versioning.customers_history`:
+For a table `public.customers`, versioning creates `history_tracking.customers_history`:
 
 ```sql
-CREATE TABLE temporal_versioning.customers_history (
+CREATE TABLE history_tracking.customers_history (
     -- All columns from the original table
     id INT,
     name VARCHAR(100),
@@ -252,8 +252,8 @@ Always test temporal operations in development/staging environments before produ
 
 ## Architecture Notes
 
-- History tables are stored in the `temporal_versioning` schema
-- Metadata is tracked in `temporal_versioning.versioned_tables`
+- History tables are stored in the `history_tracking` schema
+- Metadata is tracked in `history_tracking.versioned_tables`
 - Uses PostgreSQL triggers for automatic change capture
 - Compatible with both UNRESTRICTED and RESTRICTED access modes
 - Revert operations require UNRESTRICTED mode
@@ -264,12 +264,12 @@ Always test temporal operations in development/staging environments before produ
 
 ```python
 # Archive old history data before a certain date
-# Execute directly: DELETE FROM temporal_versioning.customers_history
+# Execute directly: DELETE FROM history_tracking.customers_history
 #                   WHERE temporal_valid_from < '2023-01-01'
 
 # Or disable and re-enable versioning to start fresh
-disable_temporal_versioning(..., drop_history=True)
-enable_temporal_versioning(...)
+disable_table_history(..., drop_history=True)
+enable_table_history(...)
 ```
 
 ### Query Performance Degradation
@@ -277,11 +277,11 @@ enable_temporal_versioning(...)
 ```sql
 -- Add indexes on commonly queried columns
 CREATE INDEX idx_temporal_valid_from
-ON temporal_versioning.customers_history(temporal_valid_from);
+ON history_tracking.customers_history(temporal_valid_from);
 
 -- For row history queries
 CREATE INDEX idx_primary_key
-ON temporal_versioning.customers_history(id);
+ON history_tracking.customers_history(id);
 ```
 
 ## Examples from Common Scenarios
@@ -290,14 +290,14 @@ ON temporal_versioning.customers_history(id);
 
 ```python
 # 1. Before ETL starts
-enable_temporal_versioning(schema_name="public", table_name="staging_table")
+enable_table_history(schema_name="public", table_name="staging_table")
 checkpoint_time = "2024-01-15 08:00:00"  # Record current time
 
 # 2. Run ETL
 # ... ETL process ...
 
 # 3. If issues found
-compare_temporal_data(
+compare_table_history(
     schema_name="public",
     table_name="staging_table",
     timestamp1=checkpoint_time,

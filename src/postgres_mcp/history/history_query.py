@@ -1,4 +1,4 @@
-"""Temporal query and revert functionality for versioned PostgreSQL tables.
+"""History query and revert functionality for PostgreSQL tables with history tracking.
 
 This module provides functionality to query data as it existed at specific points in time
 and to revert tables to previous states.
@@ -18,18 +18,18 @@ logger = logging.getLogger(__name__)
 class ChangeRecord:
     """A single change record from history."""
 
-    temporal_id: int
+    history_id: int
     operation: str
-    valid_from: str
-    tx_id: int
+    changed_at: str
+    transaction_id: int
     data: Dict[str, Any]
 
 
-class TemporalQuery:
-    """Handles temporal queries and data reversion."""
+class HistoryQuery:
+    """Handles history queries and data reversion."""
 
     def __init__(self, sql_driver: Any):
-        """Initialize the temporal query handler.
+        """Initialize the history query handler.
 
         Args:
             sql_driver: SqlDriver instance for database operations
@@ -37,18 +37,18 @@ class TemporalQuery:
         self.sql_driver = sql_driver
 
     async def _get_history_table(self, schema_name: str, table_name: str) -> Optional[str]:
-        """Get the history table name for a versioned table.
+        """Get the history table name for a tracked table.
 
         Args:
             schema_name: Schema containing the table
             table_name: Name of the table
 
         Returns:
-            Qualified history table name or None if not versioned
+            Qualified history table name or None if not tracked
         """
         result_query = await self.sql_driver.execute_query(
             """
-            SELECT history_table_name FROM temporal_versioning.versioned_tables
+            SELECT history_table_name FROM history_tracking.tracked_tables
             WHERE schema_name = %s AND table_name = %s AND enabled = TRUE
             """,
             [schema_name, table_name],
@@ -58,10 +58,10 @@ class TemporalQuery:
         if not result:
             return None
 
-        return f"temporal_versioning.{result['history_table_name']}"
+        return f"history_tracking.{result['history_table_name']}"
 
     async def _get_table_columns(self, schema_name: str, table_name: str) -> List[str]:
-        """Get the column names for a table (excluding temporal metadata columns).
+        """Get the column names for a table (excluding history tracking metadata columns).
 
         Args:
             schema_name: Schema containing the table
@@ -100,9 +100,9 @@ class TemporalQuery:
         """
         history_table = await self._get_history_table(schema_name, table_name)
         if not history_table:
-            raise ValueError(f"Table {schema_name}.{table_name} is not temporally versioned")
+            raise ValueError(f"Table {schema_name}.{table_name} is not tracked")
 
-        # Get the base table columns (excluding temporal metadata)
+        # Get the base table columns (excluding history tracking metadata)
         columns = await self._get_table_columns(schema_name, table_name)
         column_list = ", ".join(columns)
 
@@ -112,19 +112,19 @@ class TemporalQuery:
         WITH latest_changes AS (
             SELECT
                 {column_list},
-                temporal_operation,
-                temporal_valid_from,
+                change_operation,
+                changed_at,
                 ROW_NUMBER() OVER (
-                    PARTITION BY {columns[0] if columns else "temporal_id"}
-                    ORDER BY temporal_valid_from DESC
+                    PARTITION BY {columns[0] if columns else "history_id"}
+                    ORDER BY changed_at DESC
                 ) as rn
             FROM {history_table}
-            WHERE temporal_valid_from <= %s::timestamp
+            WHERE changed_at <= %s::timestamp
         )
-        SELECT {column_list}, temporal_operation, temporal_valid_from::text as temporal_valid_from
+        SELECT {column_list}, change_operation, changed_at::text as changed_at
         FROM latest_changes
-        WHERE rn = 1 AND temporal_operation != 'DELETE'
-        ORDER BY temporal_valid_from DESC
+        WHERE rn = 1 AND change_operation != 'DELETE'
+        ORDER BY changed_at DESC
         LIMIT %s
         """
 
@@ -163,22 +163,22 @@ class TemporalQuery:
         """
         history_table = await self._get_history_table(schema_name, table_name)
         if not history_table:
-            raise ValueError(f"Table {schema_name}.{table_name} is not temporally versioned")
+            raise ValueError(f"Table {schema_name}.{table_name} is not tracked")
 
         # Build WHERE clause conditions
         conditions = []
         params = []
 
         if start_time:
-            conditions.append("temporal_valid_from >= %s::timestamp")
+            conditions.append("changed_at >= %s::timestamp")
             params.append(start_time)
 
         if end_time:
-            conditions.append("temporal_valid_from <= %s::timestamp")
+            conditions.append("changed_at <= %s::timestamp")
             params.append(end_time)
 
         if operation:
-            conditions.append("temporal_operation = %s")
+            conditions.append("change_operation = %s")
             params.append(operation.upper())
 
         where_clause = " AND ".join(conditions) if conditions else "TRUE"
@@ -189,14 +189,14 @@ class TemporalQuery:
 
         query = f"""
         SELECT
-            temporal_id,
-            temporal_operation,
-            temporal_valid_from::text as temporal_valid_from,
-            temporal_tx_id,
+            history_id,
+            change_operation,
+            changed_at::text as changed_at,
+            transaction_id,
             {column_list}
         FROM {history_table}
         WHERE {where_clause}
-        ORDER BY temporal_valid_from DESC, temporal_id DESC
+        ORDER BY changed_at DESC, history_id DESC
         LIMIT %s
         """
 
@@ -235,7 +235,7 @@ class TemporalQuery:
         """
         history_table = await self._get_history_table(schema_name, table_name)
         if not history_table:
-            raise ValueError(f"Table {schema_name}.{table_name} is not temporally versioned")
+            raise ValueError(f"Table {schema_name}.{table_name} is not tracked")
 
         qualified_table = f"{schema_name}.{table_name}"
 
@@ -303,7 +303,7 @@ class TemporalQuery:
         """
         history_table = await self._get_history_table(schema_name, table_name)
         if not history_table:
-            raise ValueError(f"Table {schema_name}.{table_name} is not temporally versioned")
+            raise ValueError(f"Table {schema_name}.{table_name} is not tracked")
 
         # Get data at both timestamps
         state1 = await self.query_at_timestamp(schema_name, table_name, timestamp1, limit=999999)
@@ -374,7 +374,7 @@ class TemporalQuery:
         """
         history_table = await self._get_history_table(schema_name, table_name)
         if not history_table:
-            raise ValueError(f"Table {schema_name}.{table_name} is not temporally versioned")
+            raise ValueError(f"Table {schema_name}.{table_name} is not tracked")
 
         # Get all changes for this specific row
         columns = await self._get_table_columns(schema_name, table_name)
@@ -382,14 +382,14 @@ class TemporalQuery:
 
         query = f"""
         SELECT
-            temporal_id,
-            temporal_operation,
-            temporal_valid_from::text as temporal_valid_from,
-            temporal_tx_id,
+            history_id,
+            change_operation,
+            changed_at::text as changed_at,
+            transaction_id,
             {column_list}
         FROM {history_table}
         WHERE {primary_key_column} = %s
-        ORDER BY temporal_valid_from DESC, temporal_id DESC
+        ORDER BY changed_at DESC, history_id DESC
         LIMIT %s
         """
 
