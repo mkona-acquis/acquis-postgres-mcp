@@ -24,6 +24,8 @@ from .artifacts import ExplainPlanArtifact
 from .database_health import DatabaseHealthTool
 from .database_health import HealthType
 from .explain import ExplainPlanTool
+from .history import HistoryManager
+from .history import HistoryQuery
 from .index.index_opt_base import MAX_NUM_INDEX_TUNING_QUERIES
 from .index.llm_opt import LLMOptimizerTool
 from .index.presentation import TextPresentation
@@ -32,8 +34,6 @@ from .sql import SafeSqlDriver
 from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
-from .temporal import TemporalManager
-from .temporal import TemporalQuery
 from .top_queries import TopQueriesCalc
 
 # Initialize FastMCP with default settings
@@ -557,72 +557,72 @@ async def get_top_queries(
 
 
 @mcp.tool(
-    description="Enable temporal versioning (history tracking) for specified tables. "
+    description="Enable history tracking for specified tables. "
     "This creates a history table and triggers to automatically track all INSERT, UPDATE, and DELETE operations. "
     "Useful for data migration workflows where you want to track changes and potentially revert.",
     annotations=ToolAnnotations(
-        title="Enable Temporal Versioning",
+        title="Enable Table History Tracking",
         destructiveHint=True,
     ),
 )
 @validate_call
-async def enable_temporal_versioning(
+async def enable_table_history(
     schema_name: str = Field(description="Schema containing the table"),
-    table_name: str = Field(description="Name of the table to enable versioning for"),
+    table_name: str = Field(description="Name of the table to enable history tracking for"),
     history_table_suffix: str = Field(description="Suffix for history table name", default="_history"),
 ) -> ResponseType:
-    """Enable temporal versioning for a table."""
+    """Enable history tracking for a table."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_mgr = TemporalManager(sql_driver)
-        result = await temporal_mgr.enable_versioning(schema_name, table_name, history_table_suffix)
+        history_mgr = HistoryManager(sql_driver)
+        result = await history_mgr.enable_tracking(schema_name, table_name, history_table_suffix)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error enabling temporal versioning: {e}")
+        logger.error(f"Error enabling table history: {e}")
         return format_error_response(str(e))
 
 
 @mcp.tool(
-    description="Disable temporal versioning for a table. "
+    description="Disable history tracking for a table. "
     "You can optionally drop the history table (which deletes all historical data) or preserve it for later analysis.",
     annotations=ToolAnnotations(
-        title="Disable Temporal Versioning",
+        title="Disable Table History Tracking",
         destructiveHint=True,
     ),
 )
 @validate_call
-async def disable_temporal_versioning(
+async def disable_table_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     drop_history: bool = Field(description="Whether to drop the history table (delete all history)", default=False),
 ) -> ResponseType:
-    """Disable temporal versioning for a table."""
+    """Disable history tracking for a table."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_mgr = TemporalManager(sql_driver)
-        result = await temporal_mgr.disable_versioning(schema_name, table_name, drop_history)
+        history_mgr = HistoryManager(sql_driver)
+        result = await history_mgr.disable_tracking(schema_name, table_name, drop_history)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error disabling temporal versioning: {e}")
+        logger.error(f"Error disabling table history: {e}")
         return format_error_response(str(e))
 
 
 @mcp.tool(
-    description="List all tables that have temporal versioning enabled. Shows both active and disabled versioned tables.",
+    description="List all tables that have history tracking enabled. Shows both active and disabled tracked tables.",
     annotations=ToolAnnotations(
-        title="List Temporal Tables",
+        title="List Tables with History Tracking",
         readOnlyHint=True,
     ),
 )
-async def list_temporal_tables() -> ResponseType:
-    """List all temporally versioned tables."""
+async def list_tables_with_history() -> ResponseType:
+    """List all tables with history tracking enabled."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_mgr = TemporalManager(sql_driver)
-        tables = await temporal_mgr.list_versioned_tables()
+        history_mgr = HistoryManager(sql_driver)
+        tables = await history_mgr.list_tracked_tables()
 
         if not tables:
-            return format_text_response("No tables have temporal versioning enabled.")
+            return format_text_response("No tables have history tracking enabled.")
 
         result = []
         for table in tables:
@@ -637,30 +637,30 @@ async def list_temporal_tables() -> ResponseType:
             )
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error listing temporal tables: {e}")
+        logger.error(f"Error listing tables with history: {e}")
         return format_error_response(str(e))
 
 
 @mcp.tool(
-    description="Get detailed temporal versioning status for a specific table, including statistics about tracked changes.",
+    description="Get detailed history tracking status for a specific table, including statistics about tracked changes.",
     annotations=ToolAnnotations(
-        title="Get Temporal Status",
+        title="Get Table History Status",
         readOnlyHint=True,
     ),
 )
 @validate_call
-async def get_temporal_status(
+async def get_table_history_status(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
 ) -> ResponseType:
-    """Get temporal versioning status for a table."""
+    """Get history tracking status for a table."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_mgr = TemporalManager(sql_driver)
-        status = await temporal_mgr.get_versioning_status(schema_name, table_name)
+        history_mgr = HistoryManager(sql_driver)
+        status = await history_mgr.get_tracking_status(schema_name, table_name)
         return format_text_response(status)
     except Exception as e:
-        logger.error(f"Error getting temporal status: {e}")
+        logger.error(f"Error getting table history status: {e}")
         return format_error_response(str(e))
 
 
@@ -669,12 +669,12 @@ async def get_temporal_status(
     "Provide timestamp in ISO format (e.g., '2024-01-15 10:30:00' or '2024-01-15T10:30:00'). "
     "This reconstructs the historical state from the version history.",
     annotations=ToolAnnotations(
-        title="Query Temporal Data",
+        title="Query Table History",
         readOnlyHint=True,
     ),
 )
 @validate_call
-async def query_temporal_data(
+async def query_table_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     timestamp: str = Field(description="ISO timestamp to query (e.g., '2024-01-15 10:30:00')"),
@@ -683,11 +683,11 @@ async def query_temporal_data(
     """Query data as it existed at a specific timestamp."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_query = TemporalQuery(sql_driver)
-        result = await temporal_query.query_at_timestamp(schema_name, table_name, timestamp, limit)
+        history_query = HistoryQuery(sql_driver)
+        result = await history_query.query_at_timestamp(schema_name, table_name, timestamp, limit)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error querying temporal data: {e}")
+        logger.error(f"Error querying table history: {e}")
         return format_error_response(str(e))
 
 
@@ -696,12 +696,12 @@ async def query_temporal_data(
     "Shows all INSERT, UPDATE, and DELETE operations. You can filter by operation type and time range. "
     "Timestamps should be in ISO format (e.g., '2024-01-15 10:30:00').",
     annotations=ToolAnnotations(
-        title="Get Change History",
+        title="Get Table Change History",
         readOnlyHint=True,
     ),
 )
 @validate_call
-async def get_change_history(
+async def get_table_change_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     start_time: str | None = Field(description="Start of time range (ISO timestamp, optional)", default=None),
@@ -712,11 +712,11 @@ async def get_change_history(
     """Get change history for a table."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_query = TemporalQuery(sql_driver)
-        result = await temporal_query.get_change_history(schema_name, table_name, start_time, end_time, operation, limit)
+        history_query = HistoryQuery(sql_driver)
+        result = await history_query.get_change_history(schema_name, table_name, start_time, end_time, operation, limit)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error getting change history: {e}")
+        logger.error(f"Error getting table change history: {e}")
         return format_error_response(str(e))
 
 
@@ -726,12 +726,12 @@ async def get_change_history(
     "ALWAYS use dry_run=True first to preview changes before executing. "
     "Useful for rolling back data migration mistakes.",
     annotations=ToolAnnotations(
-        title="Revert Table Data",
+        title="Revert Table to History",
         destructiveHint=True,
     ),
 )
 @validate_call
-async def revert_table_data(
+async def revert_table_to_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     timestamp: str = Field(description="ISO timestamp to revert to (e.g., '2024-01-15 10:30:00')"),
@@ -740,11 +740,11 @@ async def revert_table_data(
     """Revert table to a previous state."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_query = TemporalQuery(sql_driver)
-        result = await temporal_query.revert_to_timestamp(schema_name, table_name, timestamp, dry_run)
+        history_query = HistoryQuery(sql_driver)
+        result = await history_query.revert_to_timestamp(schema_name, table_name, timestamp, dry_run)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error reverting table data: {e}")
+        logger.error(f"Error reverting table to history: {e}")
         return format_error_response(str(e))
 
 
@@ -753,12 +753,12 @@ async def revert_table_data(
     "Shows added, deleted, and modified rows between the two time points. "
     "Useful for understanding the impact of data transformations.",
     annotations=ToolAnnotations(
-        title="Compare Temporal Data",
+        title="Compare Table History",
         readOnlyHint=True,
     ),
 )
 @validate_call
-async def compare_temporal_data(
+async def compare_table_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     timestamp1: str = Field(description="First (earlier) timestamp in ISO format"),
@@ -768,11 +768,11 @@ async def compare_temporal_data(
     """Compare table data between two timestamps."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_query = TemporalQuery(sql_driver)
-        result = await temporal_query.compare_timestamps(schema_name, table_name, timestamp1, timestamp2, limit)
+        history_query = HistoryQuery(sql_driver)
+        result = await history_query.compare_timestamps(schema_name, table_name, timestamp1, timestamp2, limit)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error comparing temporal data: {e}")
+        logger.error(f"Error comparing table history: {e}")
         return format_error_response(str(e))
 
 
@@ -780,12 +780,12 @@ async def compare_temporal_data(
     description="Get the complete change history for a specific row identified by its primary key. "
     "Shows all operations (INSERT, UPDATE, DELETE) that affected this row over time.",
     annotations=ToolAnnotations(
-        title="Get Row History",
+        title="Get Row Change History",
         readOnlyHint=True,
     ),
 )
 @validate_call
-async def get_row_history(
+async def get_row_change_history(
     schema_name: str = Field(description="Schema containing the table"),
     table_name: str = Field(description="Name of the table"),
     primary_key_column: str = Field(description="Name of the primary key column"),
@@ -795,11 +795,11 @@ async def get_row_history(
     """Get complete change history for a specific row."""
     try:
         sql_driver = await get_sql_driver()
-        temporal_query = TemporalQuery(sql_driver)
-        result = await temporal_query.get_row_history(schema_name, table_name, primary_key_column, primary_key_value, limit)
+        history_query = HistoryQuery(sql_driver)
+        result = await history_query.get_row_history(schema_name, table_name, primary_key_column, primary_key_value, limit)
         return format_text_response(result)
     except Exception as e:
-        logger.error(f"Error getting row history: {e}")
+        logger.error(f"Error getting row change history: {e}")
         return format_error_response(str(e))
 
 

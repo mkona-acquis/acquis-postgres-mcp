@@ -37,7 +37,7 @@ Features include:
 - **📈 Query Plans** - validate and optimize performance by reviewing EXPLAIN plans and simulating the impact of hypothetical indexes.
 - **🧠 Schema Intelligence** - context-aware SQL generation based on detailed understanding of the database schema.
 - **🛡️ Safe SQL Execution** - configurable access control, including support for read-only mode and safe SQL parsing, making it usable for both development and production.
-- **⏱️ Temporal Versioning** ⭐ NEW - automatic change tracking with point-in-time recovery and data reversion for safe migrations. [See docs](docs/TEMPORAL_VERSIONING.md)
+- **📜 History Tracking** ⭐ NEW - automatic change tracking with point-in-time recovery and data reversion for safe migrations. [See docs](docs/HISTORY_TRACKING.md)
 
 Postgres MCP Pro supports both the [Standard Input/Output (stdio)](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) and [Server-Sent Events (SSE)](https://modelcontextprotocol.io/docs/concepts/transports#server-sent-events-sse) transports, for flexibility in different environments.
 

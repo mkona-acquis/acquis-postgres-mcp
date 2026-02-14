@@ -1,6 +1,6 @@
-"""Temporal table versioning manager for PostgreSQL.
+"""History tracking manager for PostgreSQL tables.
 
-This module provides functionality to enable and disable temporal versioning on PostgreSQL tables.
+This module provides functionality to enable and disable history tracking on PostgreSQL tables.
 It creates history tables and triggers to automatically track all changes (INSERT, UPDATE, DELETE).
 """
 
@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TemporalTable:
-    """Information about a temporally versioned table."""
+class TrackedTable:
+    """Information about a table with history tracking enabled."""
 
     schema_name: str
     table_name: str
@@ -24,30 +24,30 @@ class TemporalTable:
     created_at: str | None = None
 
 
-class TemporalManager:
-    """Manages temporal versioning for PostgreSQL tables."""
+class HistoryManager:
+    """Manages history tracking for PostgreSQL tables."""
 
     def __init__(self, sql_driver: Any):
-        """Initialize the temporal manager.
+        """Initialize the history manager.
 
         Args:
             sql_driver: SqlDriver instance for database operations
         """
         self.sql_driver = sql_driver
 
-    async def _ensure_temporal_schema(self) -> None:
-        """Ensure the temporal versioning schema and metadata table exist."""
-        # Create schema for temporal infrastructure
+    async def _ensure_history_schema(self) -> None:
+        """Ensure the history tracking schema and metadata table exist."""
+        # Create schema for history tracking infrastructure
         await self.sql_driver.execute_query(
             """
-            CREATE SCHEMA IF NOT EXISTS temporal_versioning
+            CREATE SCHEMA IF NOT EXISTS history_tracking
             """
         )
 
-        # Create metadata table to track which tables have versioning enabled
+        # Create metadata table to track which tables have history tracking enabled
         await self.sql_driver.execute_query(
             """
-            CREATE TABLE IF NOT EXISTS temporal_versioning.versioned_tables (
+            CREATE TABLE IF NOT EXISTS history_tracking.tracked_tables (
                 id SERIAL PRIMARY KEY,
                 schema_name TEXT NOT NULL,
                 table_name TEXT NOT NULL,
@@ -59,29 +59,29 @@ class TemporalManager:
             """
         )
 
-    async def enable_versioning(self, schema_name: str, table_name: str, history_table_suffix: str = "_history") -> Dict[str, Any]:
-        """Enable temporal versioning for a table.
+    async def enable_tracking(self, schema_name: str, table_name: str, history_table_suffix: str = "_history") -> Dict[str, Any]:
+        """Enable history tracking for a table.
 
         This creates a history table and triggers to automatically track all changes.
 
         Args:
             schema_name: Schema containing the table
-            table_name: Name of the table to version
+            table_name: Name of the table to track
             history_table_suffix: Suffix for the history table name (default: "_history")
 
         Returns:
             Dict with status and details about the created history table
         """
-        await self._ensure_temporal_schema()
+        await self._ensure_history_schema()
 
         history_table_name = f"{table_name}{history_table_suffix}"
         qualified_table = f"{schema_name}.{table_name}"
-        qualified_history = f"temporal_versioning.{history_table_name}"
+        qualified_history = f"history_tracking.{history_table_name}"
 
-        # Check if versioning is already enabled
+        # Check if history tracking is already enabled
         existing_results = await self.sql_driver.execute_query(
             """
-            SELECT * FROM temporal_versioning.versioned_tables
+            SELECT * FROM history_tracking.tracked_tables
             WHERE schema_name = %s AND table_name = %s
             """,
             [schema_name, table_name],
@@ -91,7 +91,7 @@ class TemporalManager:
         if existing and existing.get("enabled"):
             return {
                 "status": "already_enabled",
-                "message": f"Temporal versioning is already enabled for {qualified_table}",
+                "message": f"History tracking is already enabled for {qualified_table}",
                 "history_table": qualified_history,
             }
 
@@ -132,14 +132,14 @@ class TemporalManager:
 
             column_defs.append(col_def)
 
-        # Add temporal metadata columns
+        # Add history tracking metadata columns
         column_defs.extend(
             [
-                "temporal_id BIGSERIAL PRIMARY KEY",
-                "temporal_operation VARCHAR(10) NOT NULL",  # 'INSERT', 'UPDATE', 'DELETE'
-                "temporal_valid_from TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
-                "temporal_valid_to TIMESTAMP",
-                "temporal_tx_id BIGINT NOT NULL DEFAULT txid_current()",
+                "history_id BIGSERIAL PRIMARY KEY",
+                "change_operation VARCHAR(10) NOT NULL",  # 'INSERT', 'UPDATE', 'DELETE'
+                "changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "valid_until TIMESTAMP",
+                "transaction_id BIGINT NOT NULL DEFAULT txid_current()",
             ]
         )
 
@@ -151,16 +151,16 @@ class TemporalManager:
         """
         await self.sql_driver.execute_query(create_history_sql)
 
-        # Create index on temporal columns for efficient querying
+        # Create index on history tracking columns for efficient querying
         await self.sql_driver.execute_query(
             f"""
-            CREATE INDEX IF NOT EXISTS {history_table_name}_temporal_idx
-            ON {qualified_history} (temporal_valid_from, temporal_valid_to)
+            CREATE INDEX IF NOT EXISTS {history_table_name}_history_idx
+            ON {qualified_history} (changed_at, valid_until)
             """
         )
 
         # Create trigger function to capture changes
-        trigger_function_name = f"temporal_versioning.{table_name}_history_trigger"
+        trigger_function_name = f"history_tracking.{table_name}_history_trigger"
         column_list = ", ".join(column_names)
 
         await self.sql_driver.execute_query(
@@ -169,15 +169,15 @@ class TemporalManager:
             RETURNS TRIGGER AS $$
             BEGIN
                 IF (TG_OP = 'DELETE') THEN
-                    INSERT INTO {qualified_history} ({column_list}, temporal_operation, temporal_valid_from)
+                    INSERT INTO {qualified_history} ({column_list}, change_operation, changed_at)
                     VALUES (OLD.*, 'DELETE', CURRENT_TIMESTAMP);
                     RETURN OLD;
                 ELSIF (TG_OP = 'UPDATE') THEN
-                    INSERT INTO {qualified_history} ({column_list}, temporal_operation, temporal_valid_from)
+                    INSERT INTO {qualified_history} ({column_list}, change_operation, changed_at)
                     VALUES (OLD.*, 'UPDATE', CURRENT_TIMESTAMP);
                     RETURN NEW;
                 ELSIF (TG_OP = 'INSERT') THEN
-                    INSERT INTO {qualified_history} ({column_list}, temporal_operation, temporal_valid_from)
+                    INSERT INTO {qualified_history} ({column_list}, change_operation, changed_at)
                     VALUES (NEW.*, 'INSERT', CURRENT_TIMESTAMP);
                     RETURN NEW;
                 END IF;
@@ -188,7 +188,7 @@ class TemporalManager:
         )
 
         # Create triggers for INSERT, UPDATE, DELETE
-        trigger_name = f"{table_name}_temporal_trigger"
+        trigger_name = f"{table_name}_history_trigger"
         await self.sql_driver.execute_query(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
 
         await self.sql_driver.execute_query(
@@ -202,7 +202,7 @@ class TemporalManager:
         # Register in metadata table
         await self.sql_driver.execute_query(
             """
-            INSERT INTO temporal_versioning.versioned_tables (schema_name, table_name, history_table_name, enabled)
+            INSERT INTO history_tracking.tracked_tables (schema_name, table_name, history_table_name, enabled)
             VALUES (%s, %s, %s, TRUE)
             ON CONFLICT (schema_name, table_name)
             DO UPDATE SET enabled = TRUE, history_table_name = EXCLUDED.history_table_name
@@ -212,14 +212,14 @@ class TemporalManager:
 
         return {
             "status": "enabled",
-            "message": f"Temporal versioning enabled for {qualified_table}",
+            "message": f"History tracking enabled for {qualified_table}",
             "history_table": qualified_history,
             "trigger_name": trigger_name,
             "columns_tracked": len(column_names),
         }
 
-    async def disable_versioning(self, schema_name: str, table_name: str, drop_history: bool = False) -> Dict[str, Any]:
-        """Disable temporal versioning for a table.
+    async def disable_tracking(self, schema_name: str, table_name: str, drop_history: bool = False) -> Dict[str, Any]:
+        """Disable history tracking for a table.
 
         Args:
             schema_name: Schema containing the table
@@ -234,7 +234,7 @@ class TemporalManager:
         # Get versioning info
         version_info_result = await self.sql_driver.execute_query(
             """
-            SELECT * FROM temporal_versioning.versioned_tables
+            SELECT * FROM history_tracking.tracked_tables
             WHERE schema_name = %s AND table_name = %s
             """,
             [schema_name, table_name],
@@ -243,24 +243,24 @@ class TemporalManager:
 
         if not version_info:
             return {
-                "status": "not_versioned",
-                "message": f"Temporal versioning is not enabled for {qualified_table}",
+                "status": "not_tracked",
+                "message": f"History tracking is not enabled for {qualified_table}",
             }
 
         history_table_name = version_info["history_table_name"]
-        qualified_history = f"temporal_versioning.{history_table_name}"
+        qualified_history = f"history_tracking.{history_table_name}"
 
         # Drop trigger
-        trigger_name = f"{table_name}_temporal_trigger"
+        trigger_name = f"{table_name}_history_trigger"
         await self.sql_driver.execute_query(f"DROP TRIGGER IF EXISTS {trigger_name} ON {qualified_table}")
 
         # Drop trigger function
-        trigger_function_name = f"temporal_versioning.{table_name}_history_trigger"
+        trigger_function_name = f"history_tracking.{table_name}_history_trigger"
         await self.sql_driver.execute_query(f"DROP FUNCTION IF EXISTS {trigger_function_name}()")
 
         result: Dict[str, Any] = {
             "status": "disabled",
-            "message": f"Temporal versioning disabled for {qualified_table}",
+            "message": f"History tracking disabled for {qualified_table}",
             "history_table": qualified_history,
         }
 
@@ -273,7 +273,7 @@ class TemporalManager:
             # Remove from metadata
             await self.sql_driver.execute_query(
                 """
-                DELETE FROM temporal_versioning.versioned_tables
+                DELETE FROM history_tracking.tracked_tables
                 WHERE schema_name = %s AND table_name = %s
                 """,
                 (schema_name, table_name),
@@ -282,7 +282,7 @@ class TemporalManager:
             # Just mark as disabled
             await self.sql_driver.execute_query(
                 """
-                UPDATE temporal_versioning.versioned_tables
+                UPDATE history_tracking.tracked_tables
                 SET enabled = FALSE
                 WHERE schema_name = %s AND table_name = %s
                 """,
@@ -293,30 +293,30 @@ class TemporalManager:
 
         return result
 
-    async def list_versioned_tables(self) -> List[TemporalTable]:
-        """List all tables with temporal versioning.
+    async def list_tracked_tables(self) -> List[TrackedTable]:
+        """List all tables with history tracking enabled.
 
         Returns:
-            List of TemporalTable objects
+            List of TrackedTable objects
         """
         try:
-            await self._ensure_temporal_schema()
+            await self._ensure_history_schema()
         except Exception:
-            # If schema doesn't exist, no tables are versioned
+            # If schema doesn't exist, no tables have history tracking
             return []
 
         results_query = await self.sql_driver.execute_query(
             """
             SELECT schema_name, table_name, history_table_name, enabled,
                    created_at::text as created_at
-            FROM temporal_versioning.versioned_tables
+            FROM history_tracking.tracked_tables
             ORDER BY schema_name, table_name
             """
         )
         results = [row.cells for row in results_query] if results_query else []
 
         return [
-            TemporalTable(
+            TrackedTable(
                 schema_name=row["schema_name"],
                 table_name=row["table_name"],
                 history_table_name=row["history_table_name"],
@@ -326,7 +326,7 @@ class TemporalManager:
             for row in results
         ]
 
-    async def get_versioning_status(self, schema_name: str, table_name: str) -> Dict[str, Any]:
+    async def get_tracking_status(self, schema_name: str, table_name: str) -> Dict[str, Any]:
         """Get detailed versioning status for a specific table.
 
         Args:
@@ -337,13 +337,13 @@ class TemporalManager:
             Dict with versioning status and statistics
         """
         try:
-            await self._ensure_temporal_schema()
+            await self._ensure_history_schema()
         except Exception:
-            return {"versioned": False, "message": "Temporal versioning not initialized"}
+            return {"tracked": False, "message": "History tracking not initialized"}
 
         version_info_result = await self.sql_driver.execute_query(
             """
-            SELECT * FROM temporal_versioning.versioned_tables
+            SELECT * FROM history_tracking.tracked_tables
             WHERE schema_name = %s AND table_name = %s
             """,
             [schema_name, table_name],
@@ -352,30 +352,30 @@ class TemporalManager:
 
         if not version_info:
             return {
-                "versioned": False,
-                "message": f"Table {schema_name}.{table_name} is not versioned",
+                "tracked": False,
+                "message": f"Table {schema_name}.{table_name} does not have history tracking enabled",
             }
 
-        qualified_history = f"temporal_versioning.{version_info['history_table_name']}"
+        qualified_history = f"history_tracking.{version_info['history_table_name']}"
 
         # Get statistics about the history table
         stats_result = await self.sql_driver.execute_query(
             f"""
             SELECT
                 COUNT(*) as total_changes,
-                COUNT(DISTINCT temporal_tx_id) as total_transactions,
-                MIN(temporal_valid_from)::text as first_change,
-                MAX(temporal_valid_from)::text as last_change,
-                SUM(CASE WHEN temporal_operation = 'INSERT' THEN 1 ELSE 0 END) as inserts,
-                SUM(CASE WHEN temporal_operation = 'UPDATE' THEN 1 ELSE 0 END) as updates,
-                SUM(CASE WHEN temporal_operation = 'DELETE' THEN 1 ELSE 0 END) as deletes
+                COUNT(DISTINCT transaction_id) as total_transactions,
+                MIN(changed_at)::text as first_change,
+                MAX(changed_at)::text as last_change,
+                SUM(CASE WHEN change_operation = 'INSERT' THEN 1 ELSE 0 END) as inserts,
+                SUM(CASE WHEN change_operation = 'UPDATE' THEN 1 ELSE 0 END) as updates,
+                SUM(CASE WHEN change_operation = 'DELETE' THEN 1 ELSE 0 END) as deletes
             FROM {qualified_history}
             """
         )
         stats = stats_result[0].cells if stats_result else None
 
         return {
-            "versioned": True,
+            "tracked": True,
             "enabled": version_info["enabled"],
             "schema_name": version_info["schema_name"],
             "table_name": version_info["table_name"],

@@ -12,7 +12,7 @@ This is a fork of [crystaldba/postgres-mcp](https://github.com/crystaldba/postgr
 - Add custom functionality for our team's specific use cases
 - Maintain compatibility with upstream features
 - Distribute via uvx for easy colleague access
-- **✅ Temporal Table Versioning** - Track and revert data changes for safe migrations
+- **✅ History Tracking** - Track and revert data changes for safe migrations
 
 **Syncing with upstream:**
 ```bash
@@ -177,13 +177,13 @@ uvx acquis-postgres-mcp "postgresql://user:password@host:port/dbname" --access-m
 - `ExplainPlanTool (explain/explain_plan.py)`: Generates and formats EXPLAIN/EXPLAIN ANALYZE plans, supports hypothetical indexes via HypoPG
 - `TopQueriesCalc (top_queries/top_queries_calc.py)`: Analyzes pg_stat_statements data to identify slow queries and resource-intensive workloads
 
-**Temporal Versioning (`temporal/`)** ⭐ NEW
-- `TemporalManager (temporal_manager.py)`: Manages temporal versioning for tables
+**History Tracking (`history/`)** ⭐ NEW
+- `HistoryManager (history_manager.py)`: Manages history tracking for tables
   - Creates history tables and triggers to automatically track all INSERT, UPDATE, and DELETE operations
-  - Stores metadata in `temporal_versioning` schema with `versioned_tables` tracking table
-  - Each history table includes temporal metadata: operation type, valid_from timestamp, transaction ID
-  - Supports enabling/disabling versioning and listing all versioned tables
-- `TemporalQuery (temporal_query.py)`: Queries and manipulates historical data
+  - Stores metadata in `history_tracking` schema with `tracked_tables` tracking table
+  - Each history table includes history tracking metadata: operation type, changed_at timestamp, transaction ID
+  - Supports enabling/disabling tracking and listing all tracked tables
+- `HistoryQuery (history_query.py)`: Queries and manipulates historical data
   - Query data as it existed at any specific timestamp (point-in-time recovery)
   - View change history with filtering by time range and operation type
   - Compare table states between two timestamps (diff functionality)

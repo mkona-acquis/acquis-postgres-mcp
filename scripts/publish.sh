@@ -40,6 +40,27 @@ if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
+# Rollback function
+rollback_version() {
+    echo
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}⚠️  Error detected - Rolling back version${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "s/^version = \".*\"/version = \"${CURRENT_VERSION}\"/" pyproject.toml
+    else
+        sed -i "s/^version = \".*\"/version = \"${CURRENT_VERSION}\"/" pyproject.toml
+    fi
+
+    echo -e "${GREEN}✅ Version rolled back to ${CURRENT_VERSION}${NC}"
+    echo -e "${RED}❌ Publish failed${NC}"
+    exit 1
+}
+
+# Set up trap to rollback on error or interrupt
+trap rollback_version ERR INT TERM
+
 echo
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}Step 1: Updating version in pyproject.toml${NC}"
@@ -130,10 +151,12 @@ case $PUBLISH_TARGET in
         read -p "Are you sure? [y/N]: " FINAL_CONFIRM
         if [[ ! $FINAL_CONFIRM =~ ^[Yy]$ ]]; then
             echo -e "${YELLOW}⚠️  Publish cancelled${NC}"
-            exit 0
+            rollback_version
         fi
         uv publish
         echo -e "${GREEN}✅ Published to PyPI${NC}"
+        # Disable rollback trap after successful publish
+        trap - ERR INT TERM
         echo
         echo -e "${GREEN}🎉 Version ${NEW_VERSION} is now live!${NC}"
         echo
@@ -143,12 +166,16 @@ case $PUBLISH_TARGET in
     2)
         uv publish --publish-url https://test.pypi.org/legacy/
         echo -e "${GREEN}✅ Published to Test PyPI${NC}"
+        # Disable rollback trap after successful publish
+        trap - ERR INT TERM
         echo
         echo "Test with:"
         echo -e "  ${BLUE}uvx --from https://test.pypi.org/simple/ acquis-postgres-mcp \"postgresql://...\"${NC}"
         ;;
     3)
         echo -e "${YELLOW}⚠️  Publishing skipped${NC}"
+        # Disable rollback trap if user skips publishing
+        trap - ERR INT TERM
         echo
         echo "To publish later, run:"
         echo -e "  ${BLUE}uv publish${NC}"
