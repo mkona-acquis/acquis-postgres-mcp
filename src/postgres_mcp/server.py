@@ -21,6 +21,7 @@ from postgres_mcp.index.dta_calc import DatabaseTuningAdvisor
 
 from .artifacts import ErrorResult
 from .artifacts import ExplainPlanArtifact
+from .csv_loader import CsvLoader
 from .database_health import DatabaseHealthTool
 from .database_health import HealthType
 from .explain import ExplainPlanTool
@@ -800,6 +801,58 @@ async def get_row_change_history(
         return format_text_response(result)
     except Exception as e:
         logger.error(f"Error getting row change history: {e}")
+        return format_error_response(str(e))
+
+
+@mcp.tool(
+    description="Load a CSV file into PostgreSQL as a new table. "
+    "Automatically detects date columns (TIMESTAMP), all others default to TEXT. "
+    "The CSV file must be on the server's filesystem.",
+    annotations=ToolAnnotations(
+        title="Load CSV to Table",
+        destructiveHint=True,
+    ),
+)
+@validate_call
+async def load_csv_to_table(
+    csv_path: str = Field(description="Absolute path to CSV file on the server filesystem"),
+    schema: str = Field(description="Target schema name (e.g., 'public')"),
+    table_name: str = Field(description="Name for the new table"),
+    has_header: bool = Field(description="Whether CSV has a header row", default=True),
+    detect_dates: bool = Field(description="Auto-detect date columns as TIMESTAMP", default=True),
+    delimiter: str = Field(description="CSV delimiter character", default=","),
+    encoding: str = Field(description="File encoding", default="utf-8"),
+) -> ResponseType:
+    """Load a CSV file into a new PostgreSQL table."""
+    if current_access_mode == AccessMode.RESTRICTED:
+        return format_error_response("CSV loading is not available in RESTRICTED mode. Use --access-mode=unrestricted to enable this feature.")
+
+    try:
+        sql_driver = await get_sql_driver()
+        loader = CsvLoader(sql_driver)
+        result = await loader.load_csv(
+            csv_path=csv_path,
+            schema=schema,
+            table_name=table_name,
+            has_header=has_header,
+            detect_dates=detect_dates,
+            delimiter=delimiter,
+            encoding=encoding,
+        )
+        summary = (
+            f"Successfully loaded CSV into {result['table']}.\n"
+            f"Rows inserted: {result['rows_inserted']}\n"
+            f"Columns: {result['column_count']} ({', '.join(result['columns'])})\n"
+        )
+        if result["date_columns"]:
+            summary += f"Date columns (TIMESTAMP): {', '.join(result['date_columns'])}\n"
+        return format_text_response(summary)
+    except FileNotFoundError as e:
+        return format_error_response(str(e))
+    except ValueError as e:
+        return format_error_response(str(e))
+    except Exception as e:
+        logger.error(f"Error loading CSV: {e}")
         return format_error_response(str(e))
 
 
