@@ -34,10 +34,14 @@ from .sql import SafeSqlDriver
 from .sql import SqlDriver
 from .sql import check_hypopg_installation_status
 from .sql import obfuscate_password
+from .resources import register_resources
 from .top_queries import TopQueriesCalc
 
 # Initialize FastMCP with default settings
 mcp = FastMCP("postgres-mcp")
+
+# Register dummy resources for testing
+register_resources(mcp)
 
 # Constants
 PG_STAT_STATEMENTS = "pg_stat_statements"
